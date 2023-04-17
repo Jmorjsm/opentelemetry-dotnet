@@ -21,6 +21,7 @@
     </ItemGroup>
 
     <ItemGroup>
+      <ProjectReference Include="..\OpenTelemetry.Proto\OpenTelemetry.Proto.csproj" />
       <ProjectReference Include="..\OpenTelemetry\OpenTelemetry.csproj" />
     </ItemGroup>
 </Project>

@@ -3,6 +3,7 @@ using System.IO.Abstractions;
 using Google.Protobuf;
 using Microsoft.Extensions.Options;
 using OpenTelemetry;
+using OpenTelemetry.Proto.Collector.Logs.V1;
 
 
 namespace LogForwarder.Receiver.File;
@@ -11,11 +12,10 @@ namespace LogForwarder.Receiver.File;
 /// Worker receiving files containing signal export requests of type <see cref="T"/> from a file.
 /// </summary>
 /// <typeparam name="T">the type of signal this class receives.</typeparam>
-public class FileReceiverWorker<T> : BackgroundService
+public abstract class FileReceiverWorkerBase<T> : BackgroundService
     where T : class, IMessage<T>, new()
 {
-    private static MessageParser<T> exportRequestParser;
-    private readonly ILogger<FileReceiverWorker<T>> logger;
+    private readonly ILogger<FileReceiverWorkerBase<T>> logger;
     private readonly IFileSystem fileSystem;
     private readonly string path;
     private readonly FileFormatType formatType;
@@ -23,13 +23,13 @@ public class FileReceiverWorker<T> : BackgroundService
     private readonly BaseExporter<T> exporter;
 
     /// <summary>
-    /// Initializes a new instance of the <see cref="FileReceiverWorker{T}"/> class, receiving files containing signal export requests of type <see cref="T"/>.
+    /// Initializes a new instance of the <see cref="FileReceiverWorkerBase{T}"/> class, receiving files containing signal export requests of type <see cref="T"/>.
     /// </summary>
     /// <param name="logger">the logger.</param>
     /// <param name="options">the file receiver options.</param>
     /// <param name="fileSystem">the file system.</param>
     /// <param name="exporter">the exporter to use.</param>
-    public FileReceiverWorker(ILogger<FileReceiverWorker<T>> logger, IOptions<FileReceiverWorkerOptions> options, IFileSystem fileSystem, BaseExporter<T> exporter)
+    public FileReceiverWorkerBase(ILogger<FileReceiverWorkerBase<T>> logger, IOptions<FileReceiverWorkerOptions<ExportLogsServiceRequest>> options, IFileSystem fileSystem, BaseExporter<T> exporter)
     {
         this.logger = logger;
         this.fileSystem = fileSystem;
@@ -39,7 +39,8 @@ public class FileReceiverWorker<T> : BackgroundService
         this.compressionType = options.Value.CompressionType;
     }
 
-    private static Batch<T> ParseProto(FileSystemStream fileStream)
+
+    private Batch<T> ParseProto(FileSystemStream fileStream)
     {
         // TODO: Implement based on https://github.com/open-telemetry/opentelemetry-collector-contrib/tree/main/exporter/fileexporter#file-format
         // let overallRequest = new ExportLogsServiceRequest
@@ -50,7 +51,7 @@ public class FileReceiverWorker<T> : BackgroundService
         // }
         T request = new T();
 
-        while (ReadNextProtoExportRequest(fileStream, out T? nextRequest))
+        while (this.ReadNextProtoExportRequest(fileStream, out T? nextRequest))
         {
             request.MergeFrom(nextRequest);
         }
@@ -58,7 +59,7 @@ public class FileReceiverWorker<T> : BackgroundService
         return new Batch<T>(new[] { request }, 1);
     }
 
-    private static bool ReadNextProtoExportRequest(
+    private bool ReadNextProtoExportRequest(
         FileSystemStream fileStream,
         out T exportLogsServiceRequest)
     {
@@ -79,10 +80,14 @@ public class FileReceiverWorker<T> : BackgroundService
             return false;
         }
 
-        exportLogsServiceRequest = exportRequestParser.ParseFrom(requestBuffer);
+        exportLogsServiceRequest = this.ExportRequestParser.ParseFrom(requestBuffer);
         return true;
     }
 
+    /// <summary>
+    /// Gets the parser for this message type.
+    /// </summary>
+    protected abstract MessageParser<T> ExportRequestParser { get; }
 
     /// <summary>
     /// Start processing files.
@@ -141,7 +146,7 @@ public class FileReceiverWorker<T> : BackgroundService
             case FileFormatType.Json:
                 throw new NotImplementedException();
             case FileFormatType.Proto:
-                return ParseProto(fileStream);
+                return this.ParseProto(fileStream);
             default:
                 throw new ArgumentOutOfRangeException();
         }
